@@ -1,76 +1,86 @@
-# This is a basic workflow to help you get started with Actions
-
 name: products.conholdate.cloud
 
-# Controls when the action will run. 
-on: 
-  workflow_dispatch: 
-  # Scheduled trigger
+on:
+  workflow_dispatch:
   schedule:
-  - cron: '55 */3 * * *'
-  
-  #push:
-  #  branches: [ main ]
-    #paths: [ 'content/**' ]
-  #pull_request:
-  #  branches: [ main1 ]
+    - cron: '55 */3 * * *'
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.CEPH_S3_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CEPH_S3_SECRET_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      CEPH_ENDPOINT: https://s3.dynabic.com
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      #Step 1: Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-            repository: conholdate-cloud/products.conholdate.cloud
-            token: ${{ secrets.REPO_TOKEN }}
-            ref: main
-            submodules: true  # Fetch Hugo themes
-            fetch-depth: 0 
+          repository: conholdate-cloud/products.conholdate.cloud
+          token: ${{ secrets.REPO_TOKEN }}
+          ref: main
+          submodules: true
+          fetch-depth: 0
 
-      # Step 2: Set up Node.js to run the fetch script
       - name: Set up Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
-            node-version: '18'  # Use Node.js version 14 (or other versions as needed)
+          node-version: '18'
 
-      # Step 3: Install Node.js dependencies
       - name: Install dependencies
         run: npm install
-     
-      # Step 5: Sets up thelatest version of Hugo
+
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
-            hugo-version: '0.110.0'
-            extended: true
-            
-      # Also specifies the theme we want to use
+          hugo-version: '0.110.0'
+          extended: true
+
       - name: Build site
         run: hugo --minify
-      
+
+      # Ensure AWS CLI v2 and set Ceph-friendly S3 options
+      - name: Ensure AWS CLI v2 and configure S3
+        run: |
+          set -e
+          if ! aws --version | grep -q 'aws-cli/2'; then
+            curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install --update
+          fi
+          aws --version
+          # Ceph fixes:
+          aws configure set region "$AWS_DEFAULT_REGION"
+          aws configure set s3.addressing_style path
+          aws configure set s3.checksum_mode when_required
+          # (Optional but harmless) force v4 signing:
+          aws configure set s3.signature_version s3v4
+
       - name: Sync to Ceph S3
         run: |
           aws s3 sync ./public/ s3://products.conholdate.cloud/ \
-            --endpoint-url https://s3.dynabic.com \
-            --acl public-read \
-            --delete
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.CEPH_S3_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.CEPH_S3_SECRET_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ENDPOINT_URL: https://s3.dynabic.com
- 
+            --endpoint-url "${CEPH_ENDPOINT}" \
+            --delete \
+            --only-show-errors \
+            --checksum-mode when-required
+          # NOTE: Many Ceph setups ignore or reject ACLs; if you truly need ACLs, add:
+          # --acl public-read
+          # but prefer a bucket policy/website config instead.
+
+      # Print first lines of a debug trace if sync fails
+      - name: Debug AWS CLI if failed
+        if: failure()
+        run: |
+          aws s3 ls s3://products.conholdate.cloud/ \
+            --endpoint-url "${CEPH_ENDPOINT}" \
+            --debug | head -n 200
+
       - name: Purge BunnyCDN Cache
         run: |
-           curl -siG \
+          curl -siG \
             -H "X-Api-Key: ${{ secrets.BUNNY_API_KEY }}" \
             --data-urlencode "url=https://products.conholdate.cloud" \
             "https://api.dynabic.com/bn/purge?async=true"
- 
