@@ -2,8 +2,8 @@ name: products.conholdate.cloud
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '55 */3 * * *'
+  # schedule:
+  #  - cron: '55 */3 * * *'
 
 jobs:
   build:
