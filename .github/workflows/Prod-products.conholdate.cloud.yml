@@ -9,12 +9,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Ceph / S3 credentials & settings
+      # Ceph / S3 credentials & settings (PROD)
       AWS_ACCESS_KEY_ID: ${{ secrets.CEPH_S3_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.CEPH_S3_SECRET_KEY }}
       AWS_DEFAULT_REGION: us-east-1
       AWS_EC2_METADATA_DISABLED: "true"
-      CEPH_ENDPOINT: https://s3.dynabic.com
+      # IMPORTANT: Use the same endpoint your deploy script used
+      AWS_ENDPOINT_URL: https://s3-admin.dynabic.com
       # (Optional) Bunny API key already in secrets.BUNNY_API_KEY
 
     steps:
@@ -24,7 +25,7 @@ jobs:
           repository: conholdate-cloud/products.conholdate.cloud
           token: ${{ secrets.REPO_TOKEN }}
           ref: main
-          submodules: true
+          submodules: true 
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -39,7 +40,7 @@ jobs:
         uses: peaceiris/actions-hugo@v2
         with:
           hugo-version: '0.110.0'
-          extended: true
+          extended: true 
 
       - name: Build site
         run: hugo --minify
@@ -57,25 +58,24 @@ jobs:
           # Ceph-friendly settings:
           aws configure set region "$AWS_DEFAULT_REGION"
           aws configure set s3.addressing_style path
-          aws configure set s3.checksum_mode when_required
           aws configure set s3.signature_version s3v4
+          # Do NOT set checksum_mode to when_required (can break on some builds)
+          # aws configure set s3.checksum_mode ENABLED
 
-      - name: Sync to Ceph S3
+      - name: Sync to Ceph S3 (PROD)
         run: |
           aws s3 sync ./public/ s3://products-conholdate-cloud/ \
-            --endpoint-url "${CEPH_ENDPOINT}" \
             --delete \
-            --only-show-errors
-          # If you truly need ACLs and your Ceph allows them, add: --acl public-read
+            --acl public-read
+          # NOTE: AWS_ENDPOINT_URL makes the CLI hit Ceph automatically.
+          # For first validation, we keep verbose output; add --only-show-errors later if you prefer.
 
       # Show helpful debug info IF sync fails
       - name: Debug AWS CLI if failed
         if: failure()
         run: |
-          echo "Listing bucket with --debug (first 200 lines):"
-          aws s3 ls s3://products.conholdate.cloud/ \
-            --endpoint-url "${CEPH_ENDPOINT}" \
-            --debug | head -n 200
+          echo "Listing bucket (first 200 debug lines):"
+          aws s3 ls s3://products-conholdate-cloud/ --debug | head -n 200
 
       - name: Purge BunnyCDN Cache
         if: success()
