@@ -62,7 +62,7 @@ jobs:
 
       - name: Sync to Ceph S3
         run: |
-          aws s3 sync ./public/ s3://products.conholdate.cloud/ \
+          aws s3 sync ./public/ s3://products-conholdate-cloud/ \
             --endpoint-url "${CEPH_ENDPOINT}" \
             --delete \
             --only-show-errors
